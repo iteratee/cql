@@ -8,6 +8,7 @@ import Control.Applicative
 import Control.Arrow
 import Data.Decimal
 import Data.Int
+import Data.Word
 import Data.IP
 import Data.Text (Text)
 import Data.Time
@@ -59,12 +60,30 @@ instance Cql Int8 where
     fromCql _              = Left "Expected CqlTinyInt."
 
 ------------------------------------------------------------------------------
+-- Word8
+
+instance Cql Word8 where
+    ctype = Tagged TinyIntColumn
+    toCql = CqlTinyInt . fromIntegral
+    fromCql (CqlTinyInt i) = Right (fromIntegral i)
+    fromCql _              = Left "Expected CqlTinyWord."
+
+------------------------------------------------------------------------------
 -- Int16
 
 instance Cql Int16 where
     ctype = Tagged SmallIntColumn
     toCql = CqlSmallInt
     fromCql (CqlSmallInt i) = Right i
+    fromCql _               = Left "Expected CqlSmallInt."
+
+------------------------------------------------------------------------------
+-- Word16
+
+instance Cql Word16 where
+    ctype = Tagged SmallIntColumn
+    toCql = CqlSmallInt . fromIntegral
+    fromCql (CqlSmallInt i) = Right (fromIntegral i)
     fromCql _               = Left "Expected CqlSmallInt."
 
 ------------------------------------------------------------------------------
@@ -77,12 +96,30 @@ instance Cql Int32 where
     fromCql _          = Left "Expected CqlInt."
 
 ------------------------------------------------------------------------------
+-- Word32
+
+instance Cql Word32 where
+    ctype = Tagged IntColumn
+    toCql = CqlInt . fromIntegral
+    fromCql (CqlInt i) = Right (fromIntegral i)
+    fromCql _          = Left "Expected CqlInt."
+
+------------------------------------------------------------------------------
 -- Int64
 
 instance Cql Int64 where
     ctype = Tagged BigIntColumn
     toCql = CqlBigInt
     fromCql (CqlBigInt i) = Right i
+    fromCql _             = Left "Expected CqlBigInt."
+
+------------------------------------------------------------------------------
+-- Word64
+
+instance Cql Word64 where
+    ctype = Tagged BigIntColumn
+    toCql = CqlBigInt . fromIntegral
+    fromCql (CqlBigInt i) = Right (fromIntegral i)
     fromCql _             = Left "Expected CqlBigInt."
 
 ------------------------------------------------------------------------------
