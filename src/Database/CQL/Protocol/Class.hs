@@ -168,6 +168,15 @@ instance Cql Text where
     fromCql _           = Left "Expected CqlText."
 
 ------------------------------------------------------------------------------
+-- Keyspace
+
+instance Cql Keyspace where
+    ctype = Tagged TextColumn
+    toCql = CqlText . unKeyspace
+    fromCql (CqlText s) = Right (Keyspace s)
+    fromCql _           = Left "Expected CqlText."
+
+------------------------------------------------------------------------------
 -- Ascii
 
 instance Cql Ascii where
