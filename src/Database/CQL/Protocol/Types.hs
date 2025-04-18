@@ -15,21 +15,21 @@ import qualified Data.Map.Strict      as Map
 import qualified Data.Text.Lazy       as LT
 
 newtype Keyspace = Keyspace
-    { unKeyspace :: Text } deriving (Eq, Show)
+    { unKeyspace :: Text } deriving (Eq, Ord, Show)
 
 newtype Table = Table
-    { unTable :: Text } deriving (Eq, Show)
+    { unTable :: Text } deriving (Eq, Ord, Show)
 
 -- | Opaque token passed to the server to continue result paging.
 newtype PagingState = PagingState
-    { unPagingState :: LB.ByteString } deriving (Eq, Show)
+    { unPagingState :: LB.ByteString } deriving (Eq, Ord, Show)
 
 -- | ID representing a prepared query.
 newtype QueryId k a b = QueryId
-    { unQueryId :: ByteString } deriving (Eq, Show)
+    { unQueryId :: ByteString } deriving (Eq, Ord, Show)
 
 newtype QueryString k a b = QueryString
-    { unQueryString :: LT.Text } deriving (Eq, Show)
+    { unQueryString :: LT.Text } deriving (Eq, Ord, Show)
 
 instance IsString (QueryString k a b) where
     fromString = QueryString . LT.pack
