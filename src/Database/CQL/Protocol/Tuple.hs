@@ -1,15 +1,17 @@
 {-# LANGUAGE CPP                 #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TemplateHaskell     #-}
+{-# LANGUAGE TypeApplications #-}
 
 -- | A tuple represents the types of multiple cassandra columns. It is used
 -- to check that column-types match.
 module Database.CQL.Protocol.Tuple
     ( Tuple
-    , count
     , check
-    , tuple
+    , count
+    , rowKey
     , store
+    , tuple
     , Row
     , mkRow
     , fromRow
@@ -19,12 +21,14 @@ module Database.CQL.Protocol.Tuple
 
 import Control.Applicative
 import Control.Monad
+import qualified Data.ByteString.Lazy as BSL
 import Data.Functor.Identity
-import Data.Serialize
+import Data.Int (Int32)
+import Data.Serialize (Get, Putter, Serialize (..), putLazyByteString, runPutLazy)
 import Data.Vector (Vector, (!?))
 import Data.Word
 import Database.CQL.Protocol.Class
-import Database.CQL.Protocol.Codec (getValue, putValueLength)
+import Database.CQL.Protocol.Codec (getValue, putValue, putValueLength)
 import Database.CQL.Protocol.Tuple.TH
 import Database.CQL.Protocol.Types
 import Prelude
@@ -64,6 +68,7 @@ class PrivateTuple a where
     check :: Tagged a ([ColumnType] -> [ColumnType])
     tuple :: Version -> [ColumnType] -> Get a
     store :: Version -> Putter a
+    rowKey :: Version -> [Int32] -> Putter a
 
 class PrivateTuple a => Tuple a
 
@@ -74,6 +79,7 @@ instance PrivateTuple () where
     check     = Tagged $ const []
     tuple _ _ = return ()
     store _   = const $ return ()
+    rowKey _ _ _ = pure ()
 
 instance Tuple ()
 
@@ -84,6 +90,9 @@ instance Cql a => PrivateTuple (Identity a) where
     store v (Identity a) = do
         put (1 :: Word16)
         putValueLength v (toCql a)
+    rowKey _ [] _ = pure ()
+    rowKey v [0] (Identity x) = putValue v (toCql x)
+    rowKey _ ks _ = error $ "unexpected rowKey indices: " ++ show ks
 
 instance Cql a => Tuple (Identity a)
 
@@ -94,6 +103,16 @@ instance PrivateTuple Row where
     store v r = do
         put (fromIntegral (rowLength r) :: Word16)
         Vec.mapM_ (putValueLength v) (values r)
+    rowKey _ [] _ = pure ()
+    rowKey v [i] r = putValue v $ values r Vec.! fromIntegral i
+    rowKey v is r =
+      forM_ is $ \i -> do
+        -- putValue always prepends the length as 32-bit integer. That isn't
+        -- appropriate for the top level values in a row key.
+        let component = BSL.drop 4 $ runPutLazy . putValue v $ values r Vec.! fromIntegral i
+        put (fromIntegral @_ @Word16 $ BSL.length component)
+        putLazyByteString component
+        put (0 :: Word8)
 
 instance Tuple Row
 

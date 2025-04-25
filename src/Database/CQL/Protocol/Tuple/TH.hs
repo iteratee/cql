@@ -1,10 +1,15 @@
 {-# LANGUAGE CPP                 #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TypeApplications #-}
 
 module Database.CQL.Protocol.Tuple.TH where
 
 import Control.Applicative
 import Control.Monad
+import qualified Data.ByteString.Lazy as BSL
+import qualified Data.Vector as Vec ((!), fromList)
+import Data.Word (Word16, Word8)
 import Language.Haskell.TH
 import Prelude
 
@@ -22,12 +27,14 @@ tupleInstance n = do
     let ctx = map (AppT (ConT cql)) vtypes
     td <- tupleDecl n
     sd <- storeDecl n
+    rks <- rowKeyDecl n
     return
         [ InstanceD Nothing ctx (tcon "PrivateTuple" $: tupleType)
             [ FunD (mkName "count") [countDecl n]
             , FunD (mkName "check") [taggedDecl (var "typecheck") vnames]
             , FunD (mkName "tuple") [td]
             , FunD (mkName "store") [sd]
+            , FunD (mkName "rowKey") rks
             ]
         , InstanceD Nothing ctx (tcon "Tuple" $: tupleType) []
         ]
@@ -79,6 +86,50 @@ storeDecl n = do
 #endif
     size         = var "put" $$ SigE (litInt n) (tcon "Word16")
     value x v    = var "putValueLength" $$ VarE x $$ (var "toCql" $$ VarE v)
+
+-- rowKey v [] (a, b) = pure ()
+-- rowKey v [i] (ks) = putValue v $ toVec ks Vec.! fromIntegral i
+-- rowKey v is ks =
+--   let vecKs = toVec ks
+--    in forM_ is $ \i -> do
+--         let component = runPutLazy . putValue $ vecKs Vec.! fromIntegral i
+--         put (fromIntegral @_ @Word16 $ BSL.length component)
+--         putLazyByteString component
+--         put (0 :: Word8)
+rowKeyDecl :: Int -> Q [Clause]
+rowKeyDecl n = do
+    names <- replicateM n (newName "k")
+    eb <- emptyBody
+    sb <- singleBody names
+    mb <- multiBody names
+    return $ emptyClause eb : zipWith (makeClause names) [singleP, multiP] [sb, mb]
+  where
+    unused x = mkName ("_" ++ x)
+    unusedP x = VarP (unused x)
+    v = mkName "v"
+    i = mkName "i"
+    is = mkName "is"
+    iE = pure $ VarE i
+    isE = pure $ VarE is
+    vE = pure $ VarE v
+    emptyP = ListP []
+    singleP = ListP [VarP i]
+    multiP = VarP is
+    emptyClause eb = Clause [unusedP "v", emptyP, unusedP "ks"] (NormalB eb) []
+    makeClause names pat body =
+      Clause [VarP v, pat, TupP (map VarP names)] (NormalB body) []
+    tupList names = pure $ ListE $ map (\name -> AppE (var "toCql") (VarE name)) names
+    tupVector names = [| Vec.fromList $(tupList names) |]
+    emptyBody = [| pure () |]
+    singleBody names = [| putValue $vE $ $(tupVector names) Vec.! fromIntegral $iE |]
+    multiBody names = [|
+        let ks = $(tupVector names)
+         in forM_ $isE $ \j -> do 
+              let component = runPutLazy . putValue $vE $ ks Vec.! fromIntegral j
+              put (fromIntegral @_ @Word16 $ BSL.length component)
+              putLazyByteString component
+              put @Word8 0 |]
+      
 
 genCqlInstances :: Int -> Q [Dec]
 genCqlInstances n = join <$> mapM cqlInstances [2 .. n]
