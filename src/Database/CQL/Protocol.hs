@@ -139,9 +139,12 @@ module Database.CQL.Protocol
       -- * Row, Tuple and Record
     , module Database.CQL.Protocol.Tuple
     , module Database.CQL.Protocol.Record
+      -- * Cassandra Specific Murmur3 Hash
+    , module Database.CQL.Protocol.Murmur3
     ) where
 
 import Database.CQL.Protocol.Class
+import Database.CQL.Protocol.Murmur3
 import Database.CQL.Protocol.Header
 import Database.CQL.Protocol.Record
 import Database.CQL.Protocol.Request

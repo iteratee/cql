@@ -50,13 +50,22 @@ library
     other-modules:
         Database.CQL.Protocol.Class
         Database.CQL.Protocol.Codec
+        Database.CQL.Protocol.Header
+        Database.CQL.Protocol.Murmur3
         Database.CQL.Protocol.Record
+        Database.CQL.Protocol.Request
+        Database.CQL.Protocol.Response
         Database.CQL.Protocol.Tuple
         Database.CQL.Protocol.Tuple.TH
         Database.CQL.Protocol.Types
-        Database.CQL.Protocol.Header
-        Database.CQL.Protocol.Request
-        Database.CQL.Protocol.Response
+    include-dirs:
+        murmur-src/
+    includes:
+        murmur-src/murmur_hash_3_cassandra.h
+    install-includes:
+        murmur-src/murmur_hash_3_cassandra.h
+    c-sources:
+        murmur-src/murmur_hash_3_cassandra.c
 
     if flag(incompatible-varint)
         cpp-options: -DINCOMPATIBLE_VARINT
