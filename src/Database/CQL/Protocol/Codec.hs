@@ -61,6 +61,8 @@ module Database.CQL.Protocol.Codec
 
     , putValue
     , getValue
+
+    , putValueLength
     ) where
 
 import Control.Applicative
@@ -239,14 +241,14 @@ decodeMultiMap = do
 encodeSockAddr :: Putter SockAddr
 encodeSockAddr (SockAddrInet p a) = do
     putWord8 4
-    putWord32le a
+    putWord32host a
     putWord32be (fromIntegral p)
 encodeSockAddr (SockAddrInet6 p _ (a, b, c, d) _) = do
     putWord8 16
-    putWord32host a
-    putWord32host b
-    putWord32host c
-    putWord32host d
+    putWord32be a
+    putWord32be b
+    putWord32be c
+    putWord32be d
     putWord32be (fromIntegral p)
 encodeSockAddr (SockAddrUnix _) = error "encode-socket: unix address not supported"
 #if MIN_VERSION_network(2,6,1) && !MIN_VERSION_network(3,0,0)
@@ -271,10 +273,10 @@ decodeSockAddr = do
     getPort = fromIntegral <$> getWord32be
 
     getIPv4 :: Get Word32
-    getIPv4 = getWord32le
+    getIPv4 = getWord32host
 
     getIPv6 :: Get (Word32, Word32, Word32, Word32)
-    getIPv6 = (,,,) <$> getWord32host <*> getWord32host <*> getWord32host <*> getWord32host
+    getIPv6 = (,,,) <$> getWord32be <*> getWord32be <*> getWord32be <*> getWord32be
 
 ------------------------------------------------------------------------------
 -- Consistency
@@ -404,52 +406,104 @@ decodePagingState = fmap PagingState <$> decodeBytes
 -- Value
 
 putValue :: Version -> Putter Value
-putValue _ (CqlCustom x)    = toBytes $ putLazyByteString x
-putValue _ (CqlBoolean x)   = toBytes $ putWord8 $ if x then 1 else 0
-putValue _ (CqlInt x)       = toBytes $ put x
-putValue _ (CqlBigInt x)    = toBytes $ put x
-putValue _ (CqlFloat x)     = toBytes $ putFloat32be x
-putValue _ (CqlDouble x)    = toBytes $ putFloat64be x
-putValue _ (CqlText x)      = toBytes $ putByteString (T.encodeUtf8 x)
-putValue _ (CqlUuid x)      = toBytes $ encodeUUID x
-putValue _ (CqlTimeUuid x)  = toBytes $ encodeUUID x
-putValue _ (CqlTimestamp x) = toBytes $ put x
-putValue _ (CqlAscii x)     = toBytes $ putByteString (T.encodeUtf8 x)
-putValue _ (CqlBlob x)      = toBytes $ putLazyByteString x
-putValue _ (CqlCounter x)   = toBytes $ put x
-putValue _ (CqlInet x)      = toBytes $ case x of
-    IPv4 i -> putWord32le (toHostAddress i)
-    IPv6 i -> do
-        let (a, b, c, d) = toHostAddress6 i
-        putWord32host a
-        putWord32host b
-        putWord32host c
-        putWord32host d
-putValue _ (CqlVarInt x)   = toBytes $ integer2bytes x
-putValue _ (CqlDecimal x)  = toBytes $ do
-    put (fromIntegral (decimalPlaces x) :: Int32)
+putValue _ (CqlBoolean False) = putInt8 0
+putValue _ (CqlBoolean True) = putInt8 1
+putValue _ (CqlCustom x) = putLazyByteString x
+putValue _ (CqlInt x) = putInt32be x
+putValue _ (CqlBigInt x) = putInt64be x
+putValue _ (CqlFloat x) = putFloat32be x
+putValue _ (CqlDouble x) = putFloat64be x
+putValue V4 (CqlSmallInt x) = putInt16be x
+putValue _ v@(CqlSmallInt _) = error $ "putValue: smallint: " ++ show v
+putValue V4 (CqlTinyInt x) = putInt8 x
+putValue _ v@(CqlTinyInt _) = error $ "putValue: tinyint: " ++ show v
+putValue _ (CqlVarInt x) = integer2bytes x
+putValue _ (CqlDecimal x) = do
+    putInt32be (fromIntegral $ decimalPlaces x)
     integer2bytes (decimalMantissa x)
-putValue V4   (CqlDate x)     = toBytes $ put x
-putValue _  v@(CqlDate _)     = error $ "putValue: date: " ++ show v
-putValue V4   (CqlTime x)     = toBytes $ put x
-putValue _  v@(CqlTime _)     = error $ "putValue: time: " ++ show v
-putValue V4   (CqlSmallInt x) = toBytes $ put x
-putValue _  v@(CqlSmallInt _) = error $ "putValue: smallint: " ++ show v
-putValue V4   (CqlTinyInt x)  = toBytes $ put x
-putValue _  v@(CqlTinyInt _)  = error $ "putValue: tinyint: " ++ show v
-putValue v    (CqlUdt   x)    = toBytes $ mapM_ (putValue v . snd) x
-putValue v    (CqlList x)     = toBytes $ do
+putValue _ (CqlText x) = putByteString $ T.encodeUtf8 x
+putValue _ (CqlAscii x) = putByteString $ T.encodeUtf8 x
+putValue _ (CqlInet x) = case x of
+    IPv4 i -> putWord32be $ fromIPv4w i
+    IPv6 i -> do
+      let (a, b, c, d) = fromIPv6w i
+      putWord32be a
+      putWord32be b
+      putWord32be c
+      putWord32be d
+putValue _ (CqlUuid x) = encodeUUID x
+putValue _ (CqlTimeUuid x) = encodeUUID x
+putValue _ (CqlTimestamp x) = putInt64be x
+putValue _ (CqlBlob x) = putLazyByteString x
+putValue _ (CqlCounter x) = putInt64be x
+putValue _ (CqlMaybe Nothing) = error "putValue: Nothing"
+putValue ver (CqlMaybe (Just x)) = putValue ver x
+putValue ver (CqlUdt x) = mapM_ (putValueLength ver . snd) x
+putValue ver (CqlList x) = do
+    putInt32be (fromIntegral (length x))
+    mapM_ (putValueLength ver) x
+putValue ver (CqlSet x) = do
+    putInt32be (fromIntegral (length x))
+    mapM_ (putValueLength ver) x
+putValue ver (CqlMap x) = do
+    putInt32be (fromIntegral (length x))
+    forM_ x $ \(k, val) -> putValueLength ver k >> putValueLength ver val
+putValue ver (CqlTuple x) = mapM_ (putValueLength ver) x
+putValue V4 (CqlDate x) = putInt32be x
+putValue _ v@(CqlDate _) = error $ "putValueLength: date: " ++ show v
+putValue V4 (CqlTime x) = putInt64be x
+putValue _ v@(CqlTime _) = error $ "putValueLength: time: " ++ show v
+
+putValueLength :: Version -> Putter Value
+putValueLength _ (CqlCustom x) = do
+  putWord32be (fromIntegral $ LB.length x)
+  putLazyByteString x
+putValueLength ver val@(CqlBoolean _) = putInt32be 1 >> putValue ver val
+putValueLength _ (CqlInt x) = putInt32be 4 >> putInt32be x
+putValueLength _ (CqlBigInt x) = putInt32be 8 >> putInt64be x
+putValueLength _ (CqlFloat x) = putInt32be 4 >> putFloat32be x
+putValueLength _ (CqlDouble x) = putInt32be 8 >> putFloat64be x
+putValueLength _ (CqlText x) = do
+  let xBS = (T.encodeUtf8 x)
+  putWord32be (fromIntegral $ B.length xBS)
+  putByteString xBS
+putValueLength _ (CqlUuid x) = putInt32be 16 >> encodeUUID x
+putValueLength _ (CqlTimeUuid x) = putInt32be 16 >> encodeUUID x
+putValueLength _ (CqlTimestamp x) = putInt32be 8 >> putInt64be x
+putValueLength ver (CqlAscii x) = putValueLength ver (CqlText x)
+putValueLength _ (CqlBlob x) = do
+  putWord32be (fromIntegral $ LB.length x)
+  putLazyByteString x
+putValueLength _ (CqlCounter x) = putInt32be 8 >> putInt64be x
+putValueLength ver val@(CqlInet x) = case x of
+    IPv4 _ -> putInt32be 4 >> putValue ver val
+    IPv6 _ -> putInt32be 16 >> putValue ver val
+putValueLength _ (CqlVarInt x)   = toBytes $ integer2bytes x
+putValueLength _ (CqlDecimal x)  = toBytes $ do
+    putInt32be (fromIntegral $ decimalPlaces x)
+    integer2bytes (decimalMantissa x)
+putValueLength V4   (CqlDate x)     = putInt32be 4 >> putInt32be x
+putValueLength _  v@(CqlDate _)     = error $ "putValueLength: date: " ++ show v
+putValueLength V4   (CqlTime x)     = putInt32be 8 >> putInt64be x
+putValueLength _  v@(CqlTime _)     = error $ "putValueLength: time: " ++ show v
+putValueLength V4   (CqlSmallInt x) = putInt32be 2 >> putInt16be x
+putValueLength _  v@(CqlSmallInt _) = error $ "putValueLength: smallint: " ++ show v
+putValueLength V4   (CqlTinyInt x)  = putInt32be 1 >> putInt8 x
+putValueLength _  v@(CqlTinyInt _)  = error $ "putValueLength: tinyint: " ++ show v
+putValueLength ver val@(CqlUdt _)   = toBytes $ putValue ver val -- mapM_ (putValueLength v . snd) x
+putValueLength ver val@(CqlList _)  = toBytes $ putValue ver val {- do
     encodeInt (fromIntegral (length x))
-    mapM_ (putValue v) x
-putValue v (CqlSet x) = toBytes $ do
+    mapM_ (putValueLength v) x -}
+putValueLength ver val@(CqlSet _) = toBytes $ putValue ver val {- do
     encodeInt (fromIntegral (length x))
-    mapM_ (putValue v) x
-putValue v (CqlMap x) = toBytes $ do
+    mapM_ (putValueLength v) x -}
+putValueLength ver val@(CqlMap _) = toBytes $ putValue ver val {- do
     encodeInt (fromIntegral (length x))
-    forM_ x $ \(k, w) -> putValue v k >> putValue v w
-putValue v (CqlTuple x)        = toBytes $ mapM_ (putValue v) x
-putValue _ (CqlMaybe Nothing)  = put (-1 :: Int32)
-putValue v (CqlMaybe (Just x)) = putValue v x
+    forM_ x $ \(k, w) -> putValueLength v k >> putValueLength v w
+-}
+putValueLength ver val@(CqlTuple _) = toBytes $ putValue ver val -- mapM_ (putValueLength v) x
+putValueLength _ (CqlMaybe Nothing)  = put (-1 :: Int32)
+putValueLength v (CqlMaybe (Just x)) = putValueLength v x
 
 getValue :: Version -> ColumnType -> Get Value
 getValue v (ListColumn t) = CqlList <$> getList (do
@@ -484,10 +538,10 @@ getValue _ CounterColumn    = withBytes $ CqlCounter <$> get
 getValue _ InetColumn       = withBytes $ CqlInet <$> do
     len <- remaining
     case len of
-        4  -> IPv4 . fromHostAddress <$> getWord32le
+        4  -> IPv4 . toIPv4w <$> getWord32be
         16 -> do
-            a <- (,,,) <$> getWord32host <*> getWord32host <*> getWord32host <*> getWord32host
-            return $ IPv6 (fromHostAddress6 a)
+            a <- (,,,) <$> getWord32be <*> getWord32be <*> getWord32be <*> getWord32be
+            return . IPv6 $ toIPv6w a
         n  -> fail $ "getNative: invalid Inet length: " ++ show n
 getValue V4 DateColumn     = withBytes $ CqlDate <$> get
 getValue _  DateColumn     = fail "getNative: date type"

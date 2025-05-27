@@ -24,7 +24,7 @@ import Data.Serialize
 import Data.Vector (Vector, (!?))
 import Data.Word
 import Database.CQL.Protocol.Class
-import Database.CQL.Protocol.Codec (putValue, getValue)
+import Database.CQL.Protocol.Codec (getValue, putValueLength)
 import Database.CQL.Protocol.Tuple.TH
 import Database.CQL.Protocol.Types
 import Prelude
@@ -83,7 +83,7 @@ instance Cql a => PrivateTuple (Identity a) where
     tuple v _ = Identity <$> element v ctype
     store v (Identity a) = do
         put (1 :: Word16)
-        putValue v (toCql a)
+        putValueLength v (toCql a)
 
 instance Cql a => Tuple (Identity a)
 
@@ -93,7 +93,7 @@ instance PrivateTuple Row where
     tuple v t = Row t . Vec.fromList <$> mapM (getValue v . MaybeColumn) t
     store v r = do
         put (fromIntegral (rowLength r) :: Word16)
-        Vec.mapM_ (putValue v) (values r)
+        Vec.mapM_ (putValueLength v) (values r)
 
 instance Tuple Row
 

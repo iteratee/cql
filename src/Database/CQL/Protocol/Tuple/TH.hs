@@ -65,7 +65,7 @@ tupleDecl n = do
         let f = NormalB $ mkTup (map VarE names)
         return [ FunD (mkName "combine") [Clause (map VarP names) f []] ]
 
--- store v (a, b) = put (2 :: Word16) >> putValue v (toCql a) >> putValue v (toCql b)
+-- store v (a, b) = put (2 :: Word16) >> putValueLength v (toCql a) >> putValue v (toCql b)
 storeDecl :: Int -> Q Clause
 storeDecl n = do
     let v = mkName "v"
@@ -78,7 +78,7 @@ storeDecl n = do
     body x names = DoE (NoBindS size : map (NoBindS . value x) names)
 #endif
     size         = var "put" $$ SigE (litInt n) (tcon "Word16")
-    value x v    = var "putValue" $$ VarE x $$ (var "toCql" $$ VarE v)
+    value x v    = var "putValueLength" $$ VarE x $$ (var "toCql" $$ VarE v)
 
 genCqlInstances :: Int -> Q [Dec]
 genCqlInstances n = join <$> mapM cqlInstances [2 .. n]

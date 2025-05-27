@@ -31,8 +31,8 @@ import qualified Data.Text            as T
 
 tests :: TestTree
 tests = testGroup "Codec"
-    [ testProperty "V3: getValue . putValue = id" (getPutIdentity :: Val V3 -> Property)
-    , testProperty "V4: getValue . putValue = id" (getPutIdentity :: Val V4 -> Property)
+    [ testProperty "V3: getValue . putValueLength = id" (getPutIdentity :: Val V3 -> Property)
+    , testProperty "V4: getValue . putValueLength = id" (getPutIdentity :: Val V4 -> Property)
     , testProperty "toCql . fromCql = id" toCqlFromCqlIdentity
     , testGroup "Integrals"
         [ testProperty "Int Codec"     $ integralCodec (elements [-512..512]) IntColumn CqlInt
@@ -44,12 +44,12 @@ tests = testGroup "Codec"
 getPutIdentity :: Val v -> Property
 getPutIdentity Val{..} =
     let t = typeof value
-        x = runGet (getValue version t) (runPut (putValue version value))
+        x = runGet (getValue version t) (runPut (putValueLength version value))
     in Right value === x
 
 integralCodec :: Show a => Gen a -> ColumnType -> (a -> Value) -> Property
 integralCodec g t f = forAll g $ \i ->
-    let x = f i in Right x === runGet (getValue V3 t) (runPut (putValue V3 x))
+    let x = f i in Right x === runGet (getValue V3 t) (runPut (putValueLength V3 x))
 
 toCqlFromCqlIdentity :: Value -> Property
 toCqlFromCqlIdentity x@(CqlBoolean _)   = (toCql <$> (fromCql x :: Either String Bool))     === Right x
