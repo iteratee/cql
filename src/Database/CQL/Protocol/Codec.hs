@@ -1,6 +1,7 @@
 {-# LANGUAGE BangPatterns      #-}
 {-# LANGUAGE CPP               #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TypeApplications #-}
 
 module Database.CQL.Protocol.Codec
     ( encodeByte
@@ -60,9 +61,10 @@ module Database.CQL.Protocol.Codec
     , decodeQueryId
 
     , putValue
-    , getValue
-
+    , getValuePrefix
+    , getValueLength
     , putValueLength
+    , putLazyByteString
     ) where
 
 import Control.Applicative
@@ -80,7 +82,7 @@ import Data.List (foldl')
 import Data.Text (Text)
 import Data.UUID (UUID)
 import Data.Word
-import Data.Serialize hiding (decode, encode)
+import Data.Persist hiding (decode, encode)
 import Database.CQL.Protocol.Types
 import Network.Socket (SockAddr (..), PortNumber)
 import Prelude
@@ -91,6 +93,19 @@ import qualified Data.Text.Encoding      as T
 import qualified Data.Text.Lazy          as LT
 import qualified Data.Text.Lazy.Encoding as LT
 import qualified Data.UUID               as UUID
+
+type Putter a = a -> Put ()
+
+getLazyByteString :: Int -> Get LB.ByteString
+getLazyByteString n = LB.fromStrict <$!> getByteString n
+
+getText :: Int -> Get Text
+getText n = T.decodeUtf8 <$!> getByteString n
+
+putLazyByteString :: LB.ByteString -> Put ()
+putLazyByteString lbs = do
+  forM_ (LB.toChunks lbs) $ \c ->
+    putByteString c
 
 ------------------------------------------------------------------------------
 -- Byte
@@ -114,28 +129,28 @@ decodeSignedByte = get
 -- Short
 
 encodeShort :: Putter Word16
-encodeShort = put
+encodeShort = putBE
 
 decodeShort :: Get Word16
-decodeShort = get
+decodeShort = getBE
 
 ------------------------------------------------------------------------------
 -- Signed Short
 
 encodeSignedShort :: Putter Int16
-encodeSignedShort = put
+encodeSignedShort = putBE
 
 decodeSignedShort :: Get Int16
-decodeSignedShort = get
+decodeSignedShort = getBE
 
 ------------------------------------------------------------------------------
 -- Int
 
 encodeInt :: Putter Int32
-encodeInt = put
+encodeInt = putBE
 
 decodeInt :: Get Int32
-decodeInt = get
+decodeInt = getBE
 
 ------------------------------------------------------------------------------
 -- String
@@ -154,7 +169,7 @@ encodeLongString = encodeBytes . LT.encodeUtf8
 
 decodeLongString :: Get LT.Text
 decodeLongString = do
-    n <- get :: Get Int32
+    n <- getBE :: Get Int32
     LT.decodeUtf8 <$> getLazyByteString (fromIntegral n)
 
 ------------------------------------------------------------------------------
@@ -162,12 +177,12 @@ decodeLongString = do
 
 encodeBytes :: Putter LB.ByteString
 encodeBytes bs = do
-    put (fromIntegral (LB.length bs) :: Int32)
+    putBE (fromIntegral (LB.length bs) :: Int32)
     putLazyByteString bs
 
 decodeBytes :: Get (Maybe LB.ByteString)
 decodeBytes = do
-    n <- get :: Get Int32
+    n <- getBE :: Get Int32
     if n < 0
         then return Nothing
         else Just <$> getLazyByteString (fromIntegral n)
@@ -177,12 +192,12 @@ decodeBytes = do
 
 encodeShortBytes :: Putter ByteString
 encodeShortBytes bs = do
-    put (fromIntegral (B.length bs) :: Word16)
+    putBE (fromIntegral (B.length bs) :: Word16)
     putByteString bs
 
 decodeShortBytes :: Get ByteString
 decodeShortBytes = do
-    n <- get :: Get Word16
+    n <- getBE :: Get Word16
     getByteString (fromIntegral n)
 
 ------------------------------------------------------------------------------
@@ -201,12 +216,12 @@ decodeUUID = do
 
 encodeList :: Putter [Text]
 encodeList sl = do
-    put (fromIntegral (length sl) :: Word16)
+    putBE (fromIntegral (length sl) :: Word16)
     mapM_ encodeString sl
 
 decodeList :: Get [Text]
 decodeList = do
-    n <- get :: Get Word16
+    n <- getBE :: Get Word16
     replicateM (fromIntegral n) decodeString
 
 ------------------------------------------------------------------------------
@@ -214,12 +229,12 @@ decodeList = do
 
 encodeMap :: Putter [(Text, Text)]
 encodeMap m = do
-    put (fromIntegral (length m) :: Word16)
+    putBE (fromIntegral (length m) :: Word16)
     forM_ m $ \(k, v) -> encodeString k >> encodeString v
 
 decodeMap :: Get [(Text, Text)]
 decodeMap = do
-    n <- get :: Get Word16
+    n <- getBE :: Get Word16
     replicateM (fromIntegral n) ((,) <$> decodeString <*> decodeString)
 
 ------------------------------------------------------------------------------
@@ -227,12 +242,12 @@ decodeMap = do
 
 encodeMultiMap :: Putter [(Text, [Text])]
 encodeMultiMap mm = do
-    put (fromIntegral (length mm) :: Word16)
+    putBE (fromIntegral (length mm) :: Word16)
     forM_ mm $ \(k, v) -> encodeString k >> encodeList v
 
 decodeMultiMap :: Get [(Text, [Text])]
 decodeMultiMap = do
-    n <- get :: Get Word16
+    n <- getBE :: Get Word16
     replicateM (fromIntegral n) ((,) <$> decodeString <*> decodeList)
 
 ------------------------------------------------------------------------------
@@ -240,16 +255,16 @@ decodeMultiMap = do
 
 encodeSockAddr :: Putter SockAddr
 encodeSockAddr (SockAddrInet p a) = do
-    putWord8 4
-    putWord32host a
-    putWord32be (fromIntegral p)
+    put @Word8 4
+    putHE a
+    putBE @Word32 (fromIntegral p)
 encodeSockAddr (SockAddrInet6 p _ (a, b, c, d) _) = do
-    putWord8 16
-    putWord32be a
-    putWord32be b
-    putWord32be c
-    putWord32be d
-    putWord32be (fromIntegral p)
+    put @Word8 16
+    putBE a
+    putBE b
+    putBE c
+    putBE d
+    putBE @Word32 (fromIntegral p)
 encodeSockAddr (SockAddrUnix _) = error "encode-socket: unix address not supported"
 #if MIN_VERSION_network(2,6,1) && !MIN_VERSION_network(3,0,0)
 encodeSockAddr (SockAddrCan _) = error "encode-socket: can address not supported"
@@ -257,7 +272,7 @@ encodeSockAddr (SockAddrCan _) = error "encode-socket: can address not supported
 
 decodeSockAddr :: Get SockAddr
 decodeSockAddr = do
-    n <- getWord8
+    n <- get @Word8
     case n of
         4  -> do
             i <- getIPv4
@@ -270,13 +285,13 @@ decodeSockAddr = do
         _  -> fail $ "decode-socket: unknown: " ++ show n
   where
     getPort :: Get PortNumber
-    getPort = fromIntegral <$> getWord32be
+    getPort = fromIntegral <$!> getBE @Word32
 
     getIPv4 :: Get Word32
-    getIPv4 = getWord32host
+    getIPv4 = getHE
 
     getIPv6 :: Get (Word32, Word32, Word32, Word32)
-    getIPv6 = (,,,) <$> getWord32be <*> getWord32be <*> getWord32be <*> getWord32be
+    getIPv6 = (,,,) <$> getBE <*> getBE <*> getBE <*> getBE
 
 ------------------------------------------------------------------------------
 -- Consistency
@@ -406,187 +421,179 @@ decodePagingState = fmap PagingState <$> decodeBytes
 -- Value
 
 putValue :: Version -> Putter Value
-putValue _ (CqlBoolean False) = putInt8 0
-putValue _ (CqlBoolean True) = putInt8 1
+putValue _ (CqlBoolean False) = put @Word8 0
+putValue _ (CqlBoolean True) = put @Word8 1
 putValue _ (CqlCustom x) = putLazyByteString x
-putValue _ (CqlInt x) = putInt32be x
-putValue _ (CqlBigInt x) = putInt64be x
-putValue _ (CqlFloat x) = putFloat32be x
-putValue _ (CqlDouble x) = putFloat64be x
-putValue V4 (CqlSmallInt x) = putInt16be x
+putValue _ (CqlInt x) = putBE x
+putValue _ (CqlBigInt x) = putBE x
+putValue _ (CqlFloat x) = putBE x
+putValue _ (CqlDouble x) = putBE x
+putValue V4 (CqlSmallInt x) = putBE x
 putValue _ v@(CqlSmallInt _) = error $ "putValue: smallint: " ++ show v
-putValue V4 (CqlTinyInt x) = putInt8 x
+putValue V4 (CqlTinyInt x) = put @Int8 x
 putValue _ v@(CqlTinyInt _) = error $ "putValue: tinyint: " ++ show v
 putValue _ (CqlVarInt x) = integer2bytes x
 putValue _ (CqlDecimal x) = do
-    putInt32be (fromIntegral $ decimalPlaces x)
+    putBE @Int32 (fromIntegral $ decimalPlaces x)
     integer2bytes (decimalMantissa x)
 putValue _ (CqlText x) = putByteString $ T.encodeUtf8 x
 putValue _ (CqlAscii x) = putByteString $ T.encodeUtf8 x
 putValue _ (CqlInet x) = case x of
-    IPv4 i -> putWord32be $ fromIPv4w i
+    IPv4 i -> putBE $ fromIPv4w i
     IPv6 i -> do
       let (a, b, c, d) = fromIPv6w i
-      putWord32be a
-      putWord32be b
-      putWord32be c
-      putWord32be d
+      putBE a >> putBE b >> putBE c >> putBE d
 putValue _ (CqlUuid x) = encodeUUID x
 putValue _ (CqlTimeUuid x) = encodeUUID x
-putValue _ (CqlTimestamp x) = putInt64be x
+putValue _ (CqlTimestamp x) = putBE x
 putValue _ (CqlBlob x) = putLazyByteString x
-putValue _ (CqlCounter x) = putInt64be x
+putValue _ (CqlCounter x) = putBE x
 putValue _ (CqlMaybe Nothing) = error "putValue: Nothing"
 putValue ver (CqlMaybe (Just x)) = putValue ver x
 putValue ver (CqlUdt x) = mapM_ (putValueLength ver . snd) x
 putValue ver (CqlList x) = do
-    putInt32be (fromIntegral (length x))
+    putBE @Int32 (fromIntegral (length x))
     mapM_ (putValueLength ver) x
 putValue ver (CqlSet x) = do
-    putInt32be (fromIntegral (length x))
+    putBE @Int32 (fromIntegral (length x))
     mapM_ (putValueLength ver) x
 putValue ver (CqlMap x) = do
-    putInt32be (fromIntegral (length x))
+    putBE @Int32 (fromIntegral (length x))
     forM_ x $ \(k, val) -> putValueLength ver k >> putValueLength ver val
 putValue ver (CqlTuple x) = mapM_ (putValueLength ver) x
-putValue V4 (CqlDate x) = putInt32be x
+putValue V4 (CqlDate x) = putBE x
 putValue _ v@(CqlDate _) = error $ "putValueLength: date: " ++ show v
-putValue V4 (CqlTime x) = putInt64be x
+putValue V4 (CqlTime x) = putBE x
 putValue _ v@(CqlTime _) = error $ "putValueLength: time: " ++ show v
 
 putValueLength :: Version -> Putter Value
 putValueLength _ (CqlCustom x) = do
-  putWord32be (fromIntegral $ LB.length x)
+  putBE @Int32 (fromIntegral $ LB.length x)
   putLazyByteString x
-putValueLength ver val@(CqlBoolean _) = putInt32be 1 >> putValue ver val
-putValueLength _ (CqlInt x) = putInt32be 4 >> putInt32be x
-putValueLength _ (CqlBigInt x) = putInt32be 8 >> putInt64be x
-putValueLength _ (CqlFloat x) = putInt32be 4 >> putFloat32be x
-putValueLength _ (CqlDouble x) = putInt32be 8 >> putFloat64be x
+putValueLength ver val@(CqlBoolean _) = putBE @Int32 1 >> putValue ver val
+putValueLength _ (CqlInt x) = putBE @Int32 4 >> putBE x
+putValueLength _ (CqlBigInt x) = putBE @Int32 8 >> putBE x
+putValueLength _ (CqlFloat x) = putBE @Int32 4 >> putBE x
+putValueLength _ (CqlDouble x) = putBE @Int32 8 >> putBE x
 putValueLength _ (CqlText x) = do
   let xBS = (T.encodeUtf8 x)
-  putWord32be (fromIntegral $ B.length xBS)
+  putBE @Int32 (fromIntegral $ B.length xBS)
   putByteString xBS
-putValueLength _ (CqlUuid x) = putInt32be 16 >> encodeUUID x
-putValueLength _ (CqlTimeUuid x) = putInt32be 16 >> encodeUUID x
-putValueLength _ (CqlTimestamp x) = putInt32be 8 >> putInt64be x
+putValueLength _ (CqlUuid x) = putBE @Int32 16 >> encodeUUID x
+putValueLength _ (CqlTimeUuid x) = putBE @Int32 16 >> encodeUUID x
+putValueLength _ (CqlTimestamp x) = putBE @Int32 8 >> putBE x
 putValueLength ver (CqlAscii x) = putValueLength ver (CqlText x)
 putValueLength _ (CqlBlob x) = do
-  putWord32be (fromIntegral $ LB.length x)
+  putBE @Int32 (fromIntegral $ LB.length x)
   putLazyByteString x
-putValueLength _ (CqlCounter x) = putInt32be 8 >> putInt64be x
+putValueLength _ (CqlCounter x) = putBE @Int32 8 >> putBE x
 putValueLength ver val@(CqlInet x) = case x of
-    IPv4 _ -> putInt32be 4 >> putValue ver val
-    IPv6 _ -> putInt32be 16 >> putValue ver val
-putValueLength _ (CqlVarInt x)   = toBytes $ integer2bytes x
-putValueLength _ (CqlDecimal x)  = toBytes $ do
-    putInt32be (fromIntegral $ decimalPlaces x)
-    integer2bytes (decimalMantissa x)
-putValueLength V4   (CqlDate x)     = putInt32be 4 >> putInt32be x
+    IPv4 _ -> putBE @Int32 4 >> putValue ver val
+    IPv6 _ -> putBE @Int32 16 >> putValue ver val
+putValueLength V4   (CqlDate x)     = putBE @Int32 4 >> putBE x
 putValueLength _  v@(CqlDate _)     = error $ "putValueLength: date: " ++ show v
-putValueLength V4   (CqlTime x)     = putInt32be 8 >> putInt64be x
+putValueLength V4   (CqlTime x)     = putBE @Int32 8 >> putBE x
 putValueLength _  v@(CqlTime _)     = error $ "putValueLength: time: " ++ show v
-putValueLength V4   (CqlSmallInt x) = putInt32be 2 >> putInt16be x
+putValueLength V4   (CqlSmallInt x) = putBE @Int32 2 >> putBE x
 putValueLength _  v@(CqlSmallInt _) = error $ "putValueLength: smallint: " ++ show v
-putValueLength V4   (CqlTinyInt x)  = putInt32be 1 >> putInt8 x
+putValueLength V4   (CqlTinyInt x)  = putBE @Int32 1 >> putBE x
 putValueLength _  v@(CqlTinyInt _)  = error $ "putValueLength: tinyint: " ++ show v
-putValueLength ver val@(CqlUdt _)   = toBytes $ putValue ver val -- mapM_ (putValueLength v . snd) x
-putValueLength ver val@(CqlList _)  = toBytes $ putValue ver val {- do
-    encodeInt (fromIntegral (length x))
-    mapM_ (putValueLength v) x -}
-putValueLength ver val@(CqlSet _) = toBytes $ putValue ver val {- do
-    encodeInt (fromIntegral (length x))
-    mapM_ (putValueLength v) x -}
-putValueLength ver val@(CqlMap _) = toBytes $ putValue ver val {- do
-    encodeInt (fromIntegral (length x))
-    forM_ x $ \(k, w) -> putValueLength v k >> putValueLength v w
--}
-putValueLength ver val@(CqlTuple _) = toBytes $ putValue ver val -- mapM_ (putValueLength v) x
-putValueLength _ (CqlMaybe Nothing)  = put (-1 :: Int32)
+putValueLength _ (CqlMaybe Nothing)  = putBE @Int32 (-1)
 putValueLength v (CqlMaybe (Just x)) = putValueLength v x
+putValueLength ver val = withLength32 $ putValue ver val
 
-getValue :: Version -> ColumnType -> Get Value
-getValue v (ListColumn t) = CqlList <$> getList (do
+getValueLength :: Version -> ColumnType -> Get Value
+getValueLength ver colType@(MaybeColumn _) = do
+  mLen <- getBE @Int32
+  if mLen < -1
+    then fail $ "getNative: MaybeColumn too small: " ++ show mLen
+    else getValuePrefix ver colType mLen
+getValueLength v t = withReadPrefix (getValuePrefix v t)
+
+getValuePrefix :: Version -> ColumnType -> Int32 -> Get Value
+getValuePrefix v (ListColumn t) listLength = CqlList <$!> getList listLength (do
     len <- decodeInt
-    replicateM (fromIntegral len) (getValue v t))
-getValue v (SetColumn t) = CqlSet <$> getList (do
+    replicateM (fromIntegral len) (getValueLength v t))
+getValuePrefix v (SetColumn t) setLength = CqlSet <$!> getList setLength (do
     len <- decodeInt
-    replicateM (fromIntegral len) (getValue v t))
-getValue v (MapColumn t u) = CqlMap <$> getList (do
+    replicateM (fromIntegral len) (getValueLength v t))
+getValuePrefix v (MapColumn t u) mapLength = CqlMap <$!> getList mapLength (do
     len <- decodeInt
-    replicateM (fromIntegral len) ((,) <$> getValue v t <*> getValue v u))
-getValue v (TupleColumn t) = withBytes $ CqlTuple <$> mapM (getValue v) t
-getValue v (MaybeColumn t) = do
-    n <- lookAhead (get :: Get Int32)
-    if n < 0
-        then uncheckedSkip 4 >> return (CqlMaybe Nothing)
-        else CqlMaybe . Just <$> getValue v t
-getValue _ (CustomColumn _) = withBytes $ CqlCustom <$> remainingBytesLazy
-getValue _ BooleanColumn    = withBytes $ CqlBoolean . (/= 0) <$> getWord8
-getValue _ IntColumn        = withBytes $ CqlInt <$> get
-getValue _ BigIntColumn     = withBytes $ CqlBigInt <$> get
-getValue _ FloatColumn      = withBytes $ CqlFloat  <$> getFloat32be
-getValue _ DoubleColumn     = withBytes $ CqlDouble <$> getFloat64be
-getValue _ TextColumn       = withBytes $ CqlText . T.decodeUtf8 <$> remainingBytes
-getValue _ VarCharColumn    = withBytes $ CqlText . T.decodeUtf8 <$> remainingBytes
-getValue _ AsciiColumn      = withBytes $ CqlAscii . T.decodeUtf8 <$> remainingBytes
-getValue _ BlobColumn       = withBytes $ CqlBlob <$> remainingBytesLazy
-getValue _ UuidColumn       = withBytes $ CqlUuid <$> decodeUUID
-getValue _ TimeUuidColumn   = withBytes $ CqlTimeUuid <$> decodeUUID
-getValue _ TimestampColumn  = withBytes $ CqlTimestamp <$> get
-getValue _ CounterColumn    = withBytes $ CqlCounter <$> get
-getValue _ InetColumn       = withBytes $ CqlInet <$> do
-    len <- remaining
-    case len of
-        4  -> IPv4 . toIPv4w <$> getWord32be
+    replicateM (fromIntegral len) ((,) <$!> getValueLength v t <*> getValueLength v u))
+getValuePrefix v (TupleColumn t) tLength = withPrefix tLength $ CqlTuple <$!> mapM (getValueLength v) t
+getValuePrefix v (MaybeColumn t) mLength = do
+    if mLength < 0
+        then return (CqlMaybe Nothing)
+        else CqlMaybe . Just <$!> getValuePrefix v t mLength
+getValuePrefix _ (CustomColumn _) l = CqlCustom <$!> getLazyByteString (fromIntegral l)
+getValuePrefix _ BooleanColumn l = assertLength 1 l >> CqlBoolean . (/= 0) <$!> get @Word8
+getValuePrefix _ IntColumn     l  = assertLength 4 l >> CqlInt <$!> getBE
+getValuePrefix _ BigIntColumn  l  = assertLength 8 l >> CqlBigInt <$!> getBE
+getValuePrefix _ FloatColumn   l  = assertLength 4 l >> CqlFloat  <$!> getBE
+getValuePrefix _ DoubleColumn  l  = assertLength 8 l >> CqlDouble <$!> getBE
+getValuePrefix _ TextColumn    l  = CqlText <$!> getText (fromIntegral l)
+getValuePrefix _ VarCharColumn l  = CqlText <$!> getText (fromIntegral l)
+getValuePrefix _ AsciiColumn   l  = CqlAscii <$!> getText (fromIntegral l)
+getValuePrefix _ BlobColumn    l  = CqlBlob <$!> getLazyByteString (fromIntegral l)
+getValuePrefix _ UuidColumn    l  = assertLength 16 l >> CqlUuid <$!> decodeUUID
+getValuePrefix _ TimeUuidColumn l = assertLength 16 l >> CqlTimeUuid <$!> decodeUUID
+getValuePrefix _ TimestampColumn l = assertLength 8 l >> CqlTimestamp <$!> getBE
+getValuePrefix _ CounterColumn  l = assertLength 8 l >> CqlCounter <$!> getBE
+getValuePrefix _ InetColumn l = CqlInet <$!> do
+    case l of
+        4  -> IPv4 . toIPv4w <$!> getBE
         16 -> do
-            a <- (,,,) <$> getWord32be <*> getWord32be <*> getWord32be <*> getWord32be
-            return . IPv6 $ toIPv6w a
+            a <- getBE
+            b <- getBE
+            c <- getBE
+            d <- getBE
+            pure . IPv6 $! toIPv6w (a, b, c, d)
         n  -> fail $ "getNative: invalid Inet length: " ++ show n
-getValue V4 DateColumn     = withBytes $ CqlDate <$> get
-getValue _  DateColumn     = fail "getNative: date type"
-getValue V4 TimeColumn     = withBytes $ CqlTime <$> get
-getValue _  TimeColumn     = fail "getNative: time type"
-getValue V4 SmallIntColumn = withBytes $ CqlSmallInt <$> get
-getValue _  SmallIntColumn = fail "getNative: smallint type"
-getValue V4 TinyIntColumn  = withBytes $ CqlTinyInt <$> get
-getValue _  TinyIntColumn  = fail "getNative: tinyint type"
-getValue _  VarIntColumn   = withBytes $ CqlVarInt <$> bytes2integer
-getValue _  DecimalColumn  = withBytes $ do
-    x <- get :: Get Int32
+getValuePrefix V4 DateColumn   l = assertLength 4 l >> CqlDate <$!> getBE
+getValuePrefix _  DateColumn   _ = fail "getNative: date type"
+getValuePrefix V4 TimeColumn   l = assertLength 8 l >> CqlTime <$!> getBE
+getValuePrefix _  TimeColumn   _ = fail "getNative: time type"
+getValuePrefix V4 SmallIntColumn l = assertLength 2 l >> CqlSmallInt <$!> getBE
+getValuePrefix _  SmallIntColumn _ = fail "getNative: smallint type"
+getValuePrefix V4 TinyIntColumn l  = assertLength 1 l >> CqlTinyInt <$!> get
+getValuePrefix _  TinyIntColumn _ = fail "getNative: tinyint type"
+getValuePrefix _  VarIntColumn  l = withPrefix l $ CqlVarInt <$!> bytes2integer
+getValuePrefix _  DecimalColumn l = withPrefix l $ do
+    x <- getBE @Int32
     y <- bytes2integer
     return (CqlDecimal (Decimal (fromIntegral x) y))
-getValue v (UdtColumn _ x) = withBytes $ CqlUdt <$> do
+getValuePrefix v (UdtColumn _ x) l = withPrefix l $ CqlUdt <$!> do
     let (n, t) = unzip x
-    zip n <$> mapM (getValue v) t
+    zip n <$> mapM (getValueLength v) t
 
-getList :: Get [a] -> Get [a]
-getList m = do
-    n <- lookAhead (get :: Get Int32)
-    if n < 0 then uncheckedSkip 4 >> return []
-             else withBytes m
+assertLength :: Int32 -> Int32 -> Get ()
+assertLength expected provided | expected == provided = pure ()
+                               | otherwise =
+  fail $ "getNative: Expecting length: " ++ show expected ++ ", but got: " ++ show provided
 
-withBytes :: Get a -> Get a
-withBytes p = do
-    n <- fromIntegral <$> (get :: Get Int32)
+getList :: Int32 -> Get [a] -> Get [a]
+getList n m = do
+    if n < 0 then return []
+             else withPrefix n m
+
+withPrefix :: Int32 -> Get a -> Get a
+withPrefix prefixLength = getPrefix (fromIntegral prefixLength)
+
+withReadPrefix :: (Int32 -> Get a) -> Get a
+withReadPrefix p = do
+    n <- fromIntegral <$!> getBE @Int32
     when (n < 0) $
-        fail $ "withBytes: null (length = " ++ show n ++ ")"
-    b <- getBytes n
-    case runGet p b of
-        Left  e -> fail $ "withBytes: " ++ e
-        Right x -> return x
+        fail $ "withReadPrefix: null (length = " ++ show n ++ ")"
+    p n
 
 remainingBytes :: Get ByteString
 remainingBytes = remaining >>= getByteString . fromIntegral
 
-remainingBytesLazy :: Get LB.ByteString
-remainingBytesLazy = remaining >>= getLazyByteString . fromIntegral
-
-toBytes :: Put -> Put
-toBytes p = do
-    let bytes = runPut p
-    put (fromIntegral (B.length bytes) :: Int32)
-    putByteString bytes
+withLength32 :: Put () -> Put ()
+withLength32 basePut = do
+  lengthSlot <- reserveSize @Int32
+  basePut
+  resolveSizeExclusiveBE lengthSlot
 
 #ifdef INCOMPATIBLE_VARINT
 
@@ -623,18 +630,18 @@ bytes2integer = do
 
 integer2bytes :: Putter Integer
 integer2bytes n
-    | n == 0  = putWord8 0x00
-    | n == -1 = putWord8 0xFF
+    | n == 0  = put @Word8 0x00
+    | n == -1 = put @Word8 0xFF
     | n <  0  = do
         let bytes = explode (-1) n
         unless (head bytes >= 0x80) $
-            putWord8 0xFF
-        mapM_ putWord8 bytes
+            put @Word8 0xFF
+        mapM_ (put @Word8) bytes
     | otherwise = do
         let bytes = explode 0 n
         unless (head bytes < 0x80) $
-            putWord8 0x00
-        mapM_ putWord8 bytes
+            put @Word8 0x00
+        mapM_ (put @Word8) bytes
 
 explode :: Integer -> Integer -> [Word8]
 explode x n = loop n []
@@ -645,7 +652,7 @@ explode x n = loop n []
 
 bytes2integer :: Get Integer
 bytes2integer = do
-    msb   <- getWord8
+    msb   <- get @Word8
     bytes <- B.unpack <$> remainingBytes
     if msb < 0x80
         then return (implode (msb:bytes))

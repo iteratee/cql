@@ -2,6 +2,7 @@
 {-# LANGUAGE OverloadedStrings   #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StandaloneDeriving  #-}
+{-# LANGUAGE TypeApplications #-}
 
 module Database.CQL.Protocol.Request
     ( Request           (..)
@@ -59,7 +60,7 @@ import Data.Int
 import Data.Text (Text)
 import Data.Maybe (isJust)
 import Data.Monoid
-import Data.Serialize hiding (decode, encode)
+import Data.Persist hiding (decode, encode)
 import Data.Word
 import Database.CQL.Protocol.Tuple
 import Database.CQL.Protocol.Codec
@@ -90,7 +91,7 @@ data Request k a b
     | RqExecute  !(Execute k a b)
     deriving Show
 
-encodeRequest :: Tuple a => Version -> Putter (Request k a b)
+encodeRequest :: Tuple a => Version -> Request k a b -> Put ()
 encodeRequest _ (RqStartup  r) = encodeStartup r
 encodeRequest _ (RqOptions  r) = encodeOptions r
 encodeRequest _ (RqRegister r) = encodeRegister r
@@ -142,7 +143,7 @@ getOpCode (RqAuthResp _) = OcAuthResponse
 -- compression algorithm.
 data Startup = Startup !CqlVersion !CompressionAlgorithm deriving Show
 
-encodeStartup :: Putter Startup
+encodeStartup :: Startup -> Put ()
 encodeStartup (Startup v c) =
     encodeMap $ ("CQL_VERSION", mapVersion v) : mapCompression c
   where
@@ -161,7 +162,7 @@ encodeStartup (Startup v c) =
 -- | A request send in response to a previous authentication challenge.
 newtype AuthResponse = AuthResponse LB.ByteString deriving Show
 
-encodeAuthResponse :: Putter AuthResponse
+encodeAuthResponse :: AuthResponse -> Put ()
 encodeAuthResponse (AuthResponse b) = encodeBytes b
 
 ------------------------------------------------------------------------------
@@ -171,7 +172,7 @@ encodeAuthResponse (AuthResponse b) = encodeBytes b
 -- startup options.
 data Options = Options deriving Show
 
-encodeOptions :: Putter Options
+encodeOptions :: Options -> Put ()
 encodeOptions _ = return ()
 
 ------------------------------------------------------------------------------
@@ -180,7 +181,7 @@ encodeOptions _ = return ()
 -- | A CQL query (select, insert, etc.).
 data Query k a b = Query !(QueryString k a b) !(QueryParams a) deriving Show
 
-encodeQuery :: Tuple a => Version -> Putter (Query k a b)
+encodeQuery :: Tuple a => Version -> Query k a b -> Put ()
 encodeQuery v (Query (QueryString s) p) =
     encodeLongString s >> encodeQueryParams v p
 
@@ -190,7 +191,7 @@ encodeQuery v (Query (QueryString s) p) =
 -- | Executes a prepared query.
 data Execute k a b = Execute !(QueryId k a b) !(QueryParams a) deriving Show
 
-encodeExecute :: Tuple a => Version -> Putter (Execute k a b)
+encodeExecute :: Tuple a => Version -> Execute k a b -> Put ()
 encodeExecute v (Execute (QueryId q) p) =
     encodeShortBytes q >> encodeQueryParams v p
 
@@ -200,7 +201,7 @@ encodeExecute v (Execute (QueryId q) p) =
 -- | Prepare a query for later execution (cf. 'Execute').
 newtype Prepare k a b = Prepare (QueryString k a b) deriving Show
 
-encodePrepare :: Putter (Prepare k a b)
+encodePrepare :: Prepare k a b -> Put ()
 encodePrepare (Prepare (QueryString p)) = encodeLongString p
 
 ------------------------------------------------------------------------------
@@ -210,7 +211,7 @@ encodePrepare (Prepare (QueryString p)) = encodeLongString p
 -- server events.
 newtype Register = Register [EventType] deriving Show
 
-encodeRegister :: Putter Register
+encodeRegister :: Register -> Put ()
 encodeRegister (Register t) = do
     encodeShort (fromIntegral (length t))
     mapM_ encodeEventType t
@@ -222,7 +223,7 @@ data EventType
     | SchemaChangeEvent   -- ^ events related to schema change
     deriving Show
 
-encodeEventType :: Putter EventType
+encodeEventType :: EventType -> Put ()
 encodeEventType TopologyChangeEvent = encodeString "TOPOLOGY_CHANGE"
 encodeEventType StatusChangeEvent   = encodeString "STATUS_CHANGE"
 encodeEventType SchemaChangeEvent   = encodeString "SCHEMA_CHANGE"
@@ -244,7 +245,7 @@ data BatchType
     | BatchCounter  -- ^ used for batched counter updates
     deriving (Show)
 
-encodeBatch :: Version -> Putter Batch
+encodeBatch :: Version -> Batch -> Put ()
 encodeBatch v (Batch t q c s) = do
     encodeBatchType t
     encodeShort (fromIntegral (length q))
@@ -256,10 +257,10 @@ encodeBatch v (Batch t q c s) = do
     batchFlags :: Word8
     batchFlags = if isJust s then 0x10 else 0x0
 
-encodeBatchType :: Putter BatchType
-encodeBatchType BatchLogged   = putWord8 0
-encodeBatchType BatchUnLogged = putWord8 1
-encodeBatchType BatchCounter  = putWord8 2
+encodeBatchType :: BatchType -> Put ()
+encodeBatchType BatchLogged   = put @Word8 0
+encodeBatchType BatchUnLogged = put @Word8 1
+encodeBatchType BatchCounter  = put @Word8 2
 
 -- | A GADT to unify queries and prepared queries both of which can be used
 -- in batch requests.
@@ -276,13 +277,13 @@ data BatchQuery where
 
 deriving instance Show BatchQuery
 
-encodeBatchQuery :: Version -> Putter BatchQuery
+encodeBatchQuery :: Version -> BatchQuery -> Put ()
 encodeBatchQuery n (BatchQuery (QueryString q) v) = do
-    putWord8 0
+    put @Word8 0
     encodeLongString q
     store n v
 encodeBatchQuery n (BatchPrepared (QueryId i) v)  = do
-    putWord8 1
+    put @Word8 1
     encodeShortBytes i
     store n v
 
@@ -325,7 +326,7 @@ data SerialConsistency
         -- data center.
     deriving Show
 
-encodeQueryParams :: forall a. Tuple a => Version -> Putter (QueryParams a)
+encodeQueryParams :: forall a. Tuple a => Version -> QueryParams a -> Put ()
 encodeQueryParams v p = do
     encodeConsistency (consistency p)
     put queryFlags

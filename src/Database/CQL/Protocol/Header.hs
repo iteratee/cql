@@ -1,3 +1,4 @@
+{-# LANGUAGE TypeApplications #-}
 module Database.CQL.Protocol.Header
     ( Header     (..)
     , HeaderType (..)
@@ -30,11 +31,11 @@ module Database.CQL.Protocol.Header
 
 import Control.Applicative
 import Data.Bits
-import Data.ByteString.Lazy (ByteString)
+import Data.ByteString.Lazy (ByteString, toStrict)
 import Data.Int
 import Data.Monoid hiding ((<>))
 import Data.Semigroup
-import Data.Serialize
+import Data.Persist
 import Data.Word
 import Database.CQL.Protocol.Codec
 import Database.CQL.Protocol.Types
@@ -55,7 +56,7 @@ data HeaderType
     | RsHeader -- ^ A response frame header.
     deriving Show
 
-encodeHeader :: Version -> HeaderType -> Flags -> StreamId -> OpCode -> Length -> PutM ()
+encodeHeader :: Version -> HeaderType -> Flags -> StreamId -> OpCode -> Length -> Put ()
 encodeHeader v t f i o l = do
     encodeByte $ case t of
         RqHeader -> mapVersion v
@@ -67,7 +68,7 @@ encodeHeader v t f i o l = do
 
 decodeHeader :: Version -> Get Header
 decodeHeader v = do
-    b <- getWord8
+    b <- get @Word8
     Header (mapHeaderType b)
         <$> toVersion (b .&. 0x7F)
         <*> decodeFlags
@@ -80,7 +81,7 @@ mapHeaderType b = if b `testBit` 7 then RsHeader else RqHeader
 
 -- | Deserialise a frame header using the version specific decoding format.
 header :: Version -> ByteString -> Either String Header
-header v = runGetLazy (decodeHeader v)
+header v = runGet (decodeHeader v) . toStrict
 
 ------------------------------------------------------------------------------
 -- Version
@@ -100,7 +101,7 @@ toVersion w = fail $ "decode-version: unknown: " ++ show w
 -- | The type denoting a protocol frame length.
 newtype Length = Length { lengthRepr :: Int32 } deriving (Eq, Show)
 
-encodeLength :: Putter Length
+encodeLength :: Length -> Put ()
 encodeLength (Length x) = encodeInt x
 
 decodeLength :: Get Length
@@ -122,7 +123,7 @@ mkStreamId = StreamId . fromIntegral
 fromStreamId :: StreamId -> Int
 fromStreamId (StreamId i) = fromIntegral i
 
-encodeStreamId :: Version -> Putter StreamId
+encodeStreamId :: Version -> StreamId -> Put ()
 encodeStreamId V4 (StreamId x) = encodeSignedShort (fromIntegral x)
 encodeStreamId V3 (StreamId x) = encodeSignedShort (fromIntegral x)
 
@@ -144,7 +145,7 @@ instance Monoid Flags where
     mempty  = Flags 0
     mappend = (<>)
 
-encodeFlags :: Putter Flags
+encodeFlags :: Flags -> Put ()
 encodeFlags (Flags x) = encodeByte x
 
 decodeFlags :: Get Flags

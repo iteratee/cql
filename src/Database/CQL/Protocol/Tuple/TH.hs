@@ -7,7 +7,6 @@ module Database.CQL.Protocol.Tuple.TH where
 
 import Control.Applicative
 import Control.Monad
-import qualified Data.ByteString.Lazy as BSL
 import qualified Data.Vector as Vec ((!), fromList)
 import Data.Word (Word16, Word8)
 import Language.Haskell.TH
@@ -72,7 +71,7 @@ tupleDecl n = do
         let f = NormalB $ mkTup (map VarE names)
         return [ FunD (mkName "combine") [Clause (map VarP names) f []] ]
 
--- store v (a, b) = put (2 :: Word16) >> putValueLength v (toCql a) >> putValue v (toCql b)
+-- store v (a, b) = putBE (2 :: Word16) >> putValueLength v (toCql a) >> putValueLength v (toCql b)
 storeDecl :: Int -> Q Clause
 storeDecl n = do
     let v = mkName "v"
@@ -84,7 +83,7 @@ storeDecl n = do
 #else
     body x names = DoE (NoBindS size : map (NoBindS . value x) names)
 #endif
-    size         = var "put" $$ SigE (litInt n) (tcon "Word16")
+    size         = var "putBE" $$ SigE (litInt n) (tcon "Word16")
     value x v    = var "putValueLength" $$ VarE x $$ (var "toCql" $$ VarE v)
 
 -- rowKey v [] (a, b) = pure ()
@@ -92,9 +91,10 @@ storeDecl n = do
 -- rowKey v is ks =
 --   let vecKs = toVec ks
 --    in forM_ is $ \i -> do
---         let component = runPutLazy . putValue $ vecKs Vec.! fromIntegral i
---         put (fromIntegral @_ @Word16 $ BSL.length component)
---         putLazyByteString component
+--         let putComponent = putValue $ vecKs Vec.! fromIntegral i
+--         sizeRef <- reserveSize @Word16
+--         putComponent
+--         resolveSizeExclusiveBE sizeRef
 --         put (0 :: Word8)
 rowKeyDecl :: Int -> Q [Clause]
 rowKeyDecl n = do
@@ -125,9 +125,10 @@ rowKeyDecl n = do
     multiBody names = [|
         let ks = $(tupVector names)
          in forM_ $isE $ \j -> do 
-              let component = runPutLazy . putValue $vE $ ks Vec.! fromIntegral j
-              put (fromIntegral @_ @Word16 $ BSL.length component)
-              putLazyByteString component
+              let putComponent = putValue $vE $ ks Vec.! fromIntegral j
+              sizeRef <- reserveSize @Word16
+              putComponent
+              resolveSizeExclusiveBE sizeRef
               put @Word8 0 |]
       
 

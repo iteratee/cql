@@ -21,14 +21,13 @@ module Database.CQL.Protocol.Tuple
 
 import Control.Applicative
 import Control.Monad
-import qualified Data.ByteString.Lazy as BSL
 import Data.Functor.Identity
 import Data.Int (Int32)
-import Data.Serialize (Get, Putter, Serialize (..), putLazyByteString, runPutLazy)
+import Data.Persist
 import Data.Vector (Vector, (!?))
 import Data.Word
 import Database.CQL.Protocol.Class
-import Database.CQL.Protocol.Codec (getValue, putValue, putValueLength)
+import Database.CQL.Protocol.Codec (getValueLength, putValue, putValueLength)
 import Database.CQL.Protocol.Tuple.TH
 import Database.CQL.Protocol.Types
 import Prelude
@@ -67,8 +66,8 @@ class PrivateTuple a where
     count :: Tagged a Int
     check :: Tagged a ([ColumnType] -> [ColumnType])
     tuple :: Version -> [ColumnType] -> Get a
-    store :: Version -> Putter a
-    rowKey :: Version -> [Int32] -> Putter a
+    store :: Version -> a -> Put ()
+    rowKey :: Version -> [Int32] -> a -> Put ()
 
 class PrivateTuple a => Tuple a
 
@@ -88,7 +87,7 @@ instance Cql a => PrivateTuple (Identity a) where
     check     = Tagged $ typecheck [untag (ctype :: Tagged a ColumnType)]
     tuple v _ = Identity <$> element v ctype
     store v (Identity a) = do
-        put (1 :: Word16)
+        putBE (1 :: Word16)
         putValueLength v (toCql a)
     rowKey _ [] _ = pure ()
     rowKey v [0] (Identity x) = putValue v (toCql x)
@@ -99,19 +98,18 @@ instance Cql a => Tuple (Identity a)
 instance PrivateTuple Row where
     count     = Tagged (-1)
     check     = Tagged $ const []
-    tuple v t = Row t . Vec.fromList <$> mapM (getValue v . MaybeColumn) t
+    tuple v t = Row t . Vec.fromList <$> mapM (getValueLength v . MaybeColumn) t
     store v r = do
-        put (fromIntegral (rowLength r) :: Word16)
+        putBE (fromIntegral (rowLength r) :: Word16)
         Vec.mapM_ (putValueLength v) (values r)
     rowKey _ [] _ = pure ()
     rowKey v [i] r = putValue v $ values r Vec.! fromIntegral i
     rowKey v is r =
       forM_ is $ \i -> do
-        -- putValue always prepends the length as 32-bit integer. That isn't
-        -- appropriate for the top level values in a row key.
-        let component = BSL.drop 4 $ runPutLazy . putValue v $ values r Vec.! fromIntegral i
-        put (fromIntegral @_ @Word16 $ BSL.length component)
-        putLazyByteString component
+        let putComponent = putValue v $ values r Vec.! fromIntegral i
+        sizeRef <- reserveSize @Word16
+        putComponent
+        resolveSizeExclusiveBE sizeRef
         put (0 :: Word8)
 
 instance Tuple Row
@@ -119,7 +117,7 @@ instance Tuple Row
 -- Implementation helpers ---------------------------------------------------
 
 element :: Cql a => Version -> Tagged a ColumnType -> Get a
-element v t = getValue v (untag t) >>= either fail return . fromCql
+element v t = getValueLength v (untag t) >>= either fail return . fromCql
 
 typecheck :: [ColumnType] -> [ColumnType] -> [ColumnType]
 typecheck rr cc = if checkAll (===) rr cc then [] else rr

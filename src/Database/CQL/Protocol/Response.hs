@@ -58,7 +58,7 @@ import Data.ByteString (ByteString)
 import Data.Int
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
-import Data.Serialize hiding (Result)
+import Data.Persist
 import Data.Typeable
 import Data.UUID (UUID)
 import Data.Word
@@ -125,7 +125,7 @@ unpack c h b = do
     let f = flags h
     let v = version h
     x <- if compress `isSet` f then deflate c b else return b
-    flip runGetLazy x $ do
+    flip runGet (LB.toStrict x) $ do
         t <- if tracing `isSet` f then Just <$> decodeUUID else return Nothing
         w <- if warning `isSet` f then decodeList else return []
         message v t w (opCode h)
