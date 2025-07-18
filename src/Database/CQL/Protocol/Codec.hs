@@ -476,7 +476,7 @@ putValueLength _ (CqlBigInt x) = putBE @Int32 8 >> putBE x
 putValueLength _ (CqlFloat x) = putBE @Int32 4 >> putBE x
 putValueLength _ (CqlDouble x) = putBE @Int32 8 >> putBE x
 putValueLength _ (CqlText x) = do
-  let xBS = (T.encodeUtf8 x)
+  let xBS = T.encodeUtf8 x
   putBE @Int32 (fromIntegral $ B.length xBS)
   putByteString xBS
 putValueLength _ (CqlUuid x) = putBE @Int32 16 >> encodeUUID x
@@ -560,8 +560,7 @@ getValuePrefix _  TinyIntColumn _ = fail "getNative: tinyint type"
 getValuePrefix _  VarIntColumn  l = withPrefix l $ CqlVarInt <$!> bytes2integer
 getValuePrefix _  DecimalColumn l = withPrefix l $ do
     x <- getBE @Int32
-    y <- bytes2integer
-    return (CqlDecimal (Decimal (fromIntegral x) y))
+    CqlDecimal . Decimal (fromIntegral x) <$> bytes2integer
 getValuePrefix v (UdtColumn _ x) l = withPrefix l $ CqlUdt <$!> do
     let (n, t) = unzip x
     zip n <$> mapM (getValueLength v) t

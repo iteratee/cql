@@ -191,7 +191,7 @@ decodeSupported :: Get Supported
 decodeSupported = do
     opt <- decodeMultiMap
     cmp <- mapM toCompression . fromMaybe [] $ lookup "COMPRESSION" opt
-    let v = map toVersion . fromMaybe [] $ lookup "CQL_VERSION" opt
+    let v = maybe [] (map toVersion) $ lookup "CQL_VERSION" opt
     return $ Supported cmp v
   where
     toCompression "snappy" = return Snappy

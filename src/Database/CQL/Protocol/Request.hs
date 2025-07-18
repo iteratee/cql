@@ -52,7 +52,6 @@ module Database.CQL.Protocol.Request
     , encodeExecute
     ) where
 
-import Control.Applicative
 import Data.Bits
 import Data.ByteString.Lazy (ByteString)
 import Data.Foldable (traverse_)
@@ -118,7 +117,7 @@ pack v c t i r = do
         encodeHeader v RqHeader mkFlags i (getOpCode r) len
         putLazyByteString body
   where
-    runCompression f x = maybe compressError return (shrink f $ x)
+    runCompression f x = maybe compressError return (shrink f x)
     compressError      = Left "pack: compression failure"
 
     mkFlags = (if t then tracing else mempty)
@@ -252,7 +251,7 @@ encodeBatch v (Batch t q c s) = do
     mapM_ (encodeBatchQuery v) q
     encodeConsistency c
     put batchFlags
-    traverse_ encodeConsistency (mapCons <$> s)
+    traverse_ (encodeConsistency . mapCons) s
   where
     batchFlags :: Word8
     batchFlags = if isJust s then 0x10 else 0x0
@@ -333,7 +332,7 @@ encodeQueryParams v p = do
     store v (values p)
     traverse_ encodeInt         (pageSize p)
     traverse_ encodePagingState (queryPagingState p)
-    traverse_ encodeConsistency (mapCons <$> serialConsistency p)
+    traverse_ (encodeConsistency . mapCons) (serialConsistency p)
   where
     queryFlags :: Word8
     queryFlags =

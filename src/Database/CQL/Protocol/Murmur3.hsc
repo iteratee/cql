@@ -26,7 +26,7 @@ normalize x | x == minBound = maxBound
 murmur3HashKey :: ByteString -> Int64
 murmur3HashKey key = normalize . unsafePerformIO $
   unsafeUseAsCStringLen key $ \(p, l) ->
-    allocaBytesAligned ((sizeOf @Int64 0) * 2) (alignment @Int64 0) $ \hPtr -> do
+    allocaBytesAligned (sizeOf @Int64 0 * 2) (alignment @Int64 0) $ \hPtr -> do
       c_Murmur3HashCassandra (castPtr p) (fromIntegral l) 0 hPtr
       peek hPtr
     

@@ -118,7 +118,7 @@ rowKeyDecl n = do
     emptyClause eb = Clause [unusedP "v", emptyP, unusedP "ks"] (NormalB eb) []
     makeClause names pat body =
       Clause [VarP v, pat, TupP (map VarP names)] (NormalB body) []
-    tupList names = pure $ ListE $ map (\name -> AppE (var "toCql") (VarE name)) names
+    tupList names = pure $ ListE $ map (AppE (var "toCql") . VarE) names
     tupVector names = [| Vec.fromList $(tupList names) |]
     emptyBody = [| pure () |]
     singleBody names = [| putValue $vE $ $(tupVector names) Vec.! fromIntegral $iE |]
@@ -187,8 +187,8 @@ cqlInstances n = do
             <$> combine
       where
         body names = UInfixE (var "combine") (var "<$>") (foldl1 star (fn names))
-        star a b   = UInfixE a (var "<*>") b
-        fn names   = map (AppE (var "fromCql") . VarE) names
+        star a     = UInfixE a (var "<*>")
+        fn         = map (AppE (var "fromCql") . VarE)
         combine    = do
             names <- replicateM n (newName "x")
             let f = NormalB $ mkTup (map VarE names)
