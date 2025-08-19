@@ -58,19 +58,21 @@ recordInstance n = do
         _        -> fail "expecting record type"
 
 start :: Dec -> Q [Dec]
-start (DataD _ tname _ _ cons _) = do
-    unless (length cons == 1) $
-        fail "expecting single data constructor"
-    tt <- tupleType (head cons)
-    at <- asTupleDecl (head cons)
-    ar <- asRecrdDecl (head cons)
-    return
-        [ typeSynDecl (mkName "TupleType") (ConT tname) tt
-        , InstanceD Nothing [] (ConT (mkName "Record") $: ConT tname)
-            [ FunD (mkName "asTuple")  [at]
-            , FunD (mkName "asRecord") [ar]
-            ]
-        ]
+start (DataD _ tname _ _ cons _) =
+    case cons of
+        [] -> fail "expecting single data constructor"
+        (_:_:_) -> fail "expecting single data constructor"
+        [singleCon] -> do
+            tt <- tupleType singleCon
+            at <- asTupleDecl singleCon
+            ar <- asRecrdDecl singleCon
+            return
+                [ typeSynDecl (mkName "TupleType") (ConT tname) tt
+                , InstanceD Nothing [] (ConT (mkName "Record") $: ConT tname)
+                    [ FunD (mkName "asTuple")  [at]
+                    , FunD (mkName "asRecord") [ar]
+                    ]
+                ]
 start _ = fail "unsupported data type"
 
 tupleType :: Con -> Q Type

@@ -633,13 +633,15 @@ integer2bytes n
     | n == -1 = put @Word8 0xFF
     | n <  0  = do
         let bytes = explode (-1) n
-        unless (head bytes >= 0x80) $
-            put @Word8 0xFF
+        case bytes of
+            byte : _ -> unless (byte >= 0x80) $ put @Word8 0xFF
+            [] -> pure ()
         mapM_ (put @Word8) bytes
     | otherwise = do
         let bytes = explode 0 n
-        unless (head bytes < 0x80) $
-            put @Word8 0x00
+        case bytes of
+            byte : _ -> unless (byte < 0x80) $ put @Word8 0x00
+            [] -> pure ()
         mapM_ (put @Word8) bytes
 
 explode :: Integer -> Integer -> [Word8]
