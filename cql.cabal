@@ -1,18 +1,17 @@
+cabal-version:        3.6
 name:                 cql
-version:              4.0.4
+version:              4.1.0.0
 synopsis:             Cassandra CQL binary protocol.
 stability:            experimental
-license:              OtherLicense
+license:              0BSD
 license-file:         LICENSE
-author:               Toralf Wittner, Roman S. Borschel
-maintainer:           Toralf Wittner <tw@dtex.org>,
-                      Roman S. Borschel <roman@pkaboo.org>
-copyright:            (C) 2014-2015 Toralf Wittner, Roman S. Borschel
-homepage:             https://gitlab.com/twittner/cql/
-bug-reports:          https://gitlab.com/twittner/cql/issues
+author:               Kyle Butt, Toralf Wittner, Roman S. Borschel
+maintainer:           Kyle Butt <kyle@iteratee.net>
+copyright:            (C) 2014-2015 Toralf Wittner, Roman S. Borschel (C) 2024-2025 Kyle Butt
+homepage:             https://github.com/iteratee/cql/
+bug-reports:          https://github.com/iteratee/cql/issues
 category:             Database
 build-type:           Simple
-cabal-version:        >= 1.10
 extra-source-files:   README.md
                       CHANGELOG
                       CONTRIBUTING
