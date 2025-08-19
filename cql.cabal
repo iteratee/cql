@@ -30,10 +30,6 @@ description:
     Thus it can serve as a building block for writing Cassandra drivers, such
     as <http://hackage.haskell.org/package/cql-io cql-io>.
 
-flag incompatible-varint
-    description: Use incompatible legacy encoding for varint and decimal.
-    default: False
-
 source-repository head
     type:     git
     location: https://gitlab.com/twittner/cql
@@ -66,9 +62,6 @@ library
         murmur-src/murmur_hash_3_cassandra.h
     c-sources:
         murmur-src/murmur_hash_3_cassandra.c
-
-    if flag(incompatible-varint)
-        cpp-options: -DINCOMPATIBLE_VARINT
 
     build-depends:
           base             >= 4.9    && < 5.0
