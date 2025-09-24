@@ -1,3 +1,24 @@
+4.1.0.0
+-------
+- Drop incompatible varint
+- Use persist instead of cereal to avoid reserialization. The new release of
+  persist allows for length backpatching, which is exactly what the CQL native
+  encoding needs.
+- Add a utility function for the Cassandra Murmur3 hash
+- Add rowKey function to Tuple/PrivateTuple typeclass
+- Add Ord instances for newtype wrapper types
+- Add Cql instance for Keyspace newtype
+- Add Cql instances for Data.Word types
+- Supports GHC 9.2-9.12
+
+Breaking changes:
+- persist library instead of cereal. Interface of `persist` library is very
+  similar to `cereal`, so this should be easy to port.
+- `putValue` has been split into `putValue` and `putValueLength`.
+  `putValueLength` has the behavior that was previously handled by `putValue`.
+  This separation is necessary to support token aware routing. Token aware
+  routing doesn't use the length prefix on the outermost value.
+
 4.0.4
 -----
 - Compatibility with template-haskell-2.17 and 2.18.
