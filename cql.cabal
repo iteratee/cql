@@ -31,7 +31,7 @@ description:
 
 source-repository head
     type:     git
-    location: https://gitlab.com/twittner/cql
+    location: https://github.com/iteratee/cql
 
 library
     default-language: Haskell2010
