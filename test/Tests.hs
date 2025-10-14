@@ -28,18 +28,10 @@ import Prelude
 
 import qualified Data.ByteString.Lazy as LB
 import qualified Data.Text            as T
+import Test.Tasty.HUnit (testCase, Assertion, assertEqual)
+import Data.Functor.Identity (Identity(..))
+import Data.Function ((&))
 
-tests :: TestTree
-tests = testGroup "Codec"
-    [ testProperty "V3: getValue . putValueLength = id" (getPutIdentity :: Val V3 -> Property)
-    , testProperty "V4: getValue . putValueLength = id" (getPutIdentity :: Val V4 -> Property)
-    , testProperty "toCql . fromCql = id" toCqlFromCqlIdentity
-    , testGroup "Integrals"
-        [ testProperty "Int Codec"     $ integralCodec (elements [-512..512]) IntColumn CqlInt
-        , testProperty "BigInt Codec"  $ integralCodec (elements [-512..512]) BigIntColumn CqlBigInt
-        , testProperty "Integer Codec" $ integralCodec (elements [-512..512]) VarIntColumn CqlVarInt
-        ]
-    ]
 
 getPutIdentity :: Val v -> Property
 getPutIdentity Val{..} =
@@ -205,3 +197,103 @@ data TestRecord = TestRecord
 
 recordInstance ''TestRecord
 
+-----------------------------------------------------------------------------
+-- Test cases for Murmur3 partition keys
+
+testMurmur3Vectors :: Assertion
+testMurmur3Vectors = do
+    assertEqual
+        "Text key from murmur3 test vectors: WRfl"
+        422668743870662549
+        (rowKey V4 [0] (Identity ("WRfl" :: Text)) & runPut & murmur3HashKey)
+    assertEqual
+        "Text key from murmur3 test vectors: mrG7A06RDb04APyqtJDcSQ"
+        (-6351911484294487542)
+        (rowKey V4 [0] (Identity ("mrG7A06RDb04APyqtJDcSQ" :: Text)) & runPut & murmur3HashKey)
+    assertEqual
+        "Text key from murmur3 test vectors: P3/cwhnIkfwYgfg"
+        (-794555513299321809)
+        (rowKey V4 [0] (Identity ("P3/cwhnIkfwYgfg" :: Text)) & runPut & murmur3HashKey)
+    assertEqual
+        "Text key from murmur3 test vectors: 9mjOeUyuFA"
+        8688054346336436262
+        (rowKey V4 [0] (Identity ("9mjOeUyuFA" :: Text)) & runPut & murmur3HashKey)
+    assertEqual
+        "Text key from murmur3 test vectors: U/a/7qtkKQx7rzjVjDKscxbb"
+        5768307025851008073
+        (rowKey V4 [0] (Identity ("U/a/7qtkKQx7rzjVjDKscxbb" :: Text)) & runPut & murmur3HashKey)
+    assertEqual
+        "Text key from murmur3 test vectors: RfZfkoP0UPPez+6jQbvtTA1BwWiLVLLP"
+        2204601279383471284
+        (rowKey V4 [0] (Identity ("RfZfkoP0UPPez+6jQbvtTA1BwWiLVLLP" :: Text)) & runPut & murmur3HashKey)
+    assertEqual
+        "Text key from murmur3 test vectors: CzOkHw5RLoUvA3YyXlw4Lq8e4j8"
+        (-3675581488006656363)
+        (rowKey V4 [0] (Identity ("CzOkHw5RLoUvA3YyXlw4Lq8e4j8" :: Text)) & runPut & murmur3HashKey)
+    assertEqual
+        "Text key from murmur3 test vectors: wI6jMf/mmg"
+        (-1509962630060265403)
+        (rowKey V4 [0] (Identity ("wI6jMf/mmg" :: Text)) & runPut & murmur3HashKey)
+    assertEqual
+        "Text key from murmur3 test vectors: JI8cbVgTif6cB6+nSGaORSMHcr8bZw"
+        (-6681131792718328292)
+        (rowKey V4 [0] (Identity ("JI8cbVgTif6cB6+nSGaORSMHcr8bZw" :: Text)) & runPut & murmur3HashKey)
+    assertEqual
+        "Text key from murmur3 test vectors: mIycuRm3Z3LARmzEkDO4zoH1705rLD8"
+        2637968942887083513
+        (rowKey V4 [0] (Identity ("mIycuRm3Z3LARmzEkDO4zoH1705rLD8" :: Text)) & runPut & murmur3HashKey)
+    assertEqual
+        "Text key from murmur3 test vectors: Ctt0a606J7cSNA"
+        7401972305268388745
+        (rowKey V4 [0] (Identity ("Ctt0a606J7cSNA" :: Text)) & runPut & murmur3HashKey)
+    assertEqual
+        "Text key from murmur3 test vectors: 60rZ+HacaYtqujAXU4xOzZCVlFjOkjC9SlS4"
+        (-1780712415847777487)
+        (rowKey V4 [0] (Identity ("60rZ+HacaYtqujAXU4xOzZCVlFjOkjC9SlS4" :: Text)) & runPut & murmur3HashKey)
+    assertEqual
+        "Text key from murmur3 test vectors: jqMk6mIIn8NUxaKr4rQO3CyU"
+        (-7948171348135874697)
+        (rowKey V4 [0] (Identity ("jqMk6mIIn8NUxaKr4rQO3CyU" :: Text)) & runPut & murmur3HashKey)
+    assertEqual
+        "Text key from murmur3 test vectors: jRci7TcmwIARMXB3KsQdHS8Y1qj6izB4Pmksfh0"
+        (-355136189899934876)
+        (rowKey V4 [0] (Identity ("jRci7TcmwIARMXB3KsQdHS8Y1qj6izB4Pmksfh0" :: Text)) & runPut & murmur3HashKey)
+    assertEqual
+        "Text key from murmur3 test vectors: 9V9Olj0H"
+        (-7800684702521659878)
+        (rowKey V4 [0] (Identity ("9V9Olj0H" :: Text)) & runPut & murmur3HashKey)
+    assertEqual
+        "Text key from murmur3 test vectors: WLu4UWFyx0WaFlNPeCn4O1EFWzzzdM6akqyOdA"
+        5257543896247840857
+        (rowKey V4 [0] (Identity ("WLu4UWFyx0WaFlNPeCn4O1EFWzzzdM6akqyOdA" :: Text)) & runPut & murmur3HashKey)
+
+testCompoundKeys :: Assertion
+testCompoundKeys = do
+    assertEqual
+      "Known compound key for: []"
+      (-3485513579396041028)
+      (rowKey V4 [0] (Identity ([] :: [Text])) & runPut & murmur3HashKey)
+    assertEqual
+      "Known compound key for: [\"rules\"]"
+      5696842773425782423
+      (rowKey V4 [0] (Identity (["rules"] :: [Text])) & runPut & murmur3HashKey)
+    assertEqual
+      "Known compound key for: [\"rules\", \"scoring\", \"basic\"]"
+      1132589589130033412
+      (rowKey V4 [0] (Identity (["rules", "scoring", "basic"] :: [Text])) & runPut & murmur3HashKey)
+
+tests :: TestTree
+tests = testGroup "Codec"
+    [ testProperty "V3: getValue . putValueLength = id" (getPutIdentity :: Val V3 -> Property)
+    , testProperty "V4: getValue . putValueLength = id" (getPutIdentity :: Val V4 -> Property)
+    , testProperty "toCql . fromCql = id" toCqlFromCqlIdentity
+    , testGroup "Integrals"
+        [ testProperty "Int Codec"     $ integralCodec (elements [-512..512]) IntColumn CqlInt
+        , testProperty "BigInt Codec"  $ integralCodec (elements [-512..512]) BigIntColumn CqlBigInt
+        , testProperty "Integer Codec" $ integralCodec (elements [-512..512]) VarIntColumn CqlVarInt
+        ]
+    , testGroup "Tokens"
+        [ testCase "Murmur3 C Test Vectors" testMurmur3Vectors
+        , testCase "Known Compound Keys" testCompoundKeys
+        ]
+    ]

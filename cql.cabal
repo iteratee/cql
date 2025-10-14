@@ -96,6 +96,7 @@ test-suite cql-tests
         , QuickCheck
         , tasty            >= 0.8
         , tasty-quickcheck >= 0.8
+        , tasty-hunit      >= 0.10 && < 0.11
         , text
         , time
         , uuid
